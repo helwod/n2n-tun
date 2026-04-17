@@ -1,5 +1,6 @@
 /*
   (C) 2007-22 - Luca Deri <deri@ntop.org>
+  (C) 2024 - wintun support added
 */
 
 #include "defs.h"
@@ -7,6 +8,24 @@
 
 #include "n2n.h"
 #include "n2n_win32.h"
+#include "wintap.h"
+#include "wintun_windows.h"
+
+/* Forward declarations for wintun functions */
+extern int wintun_open(tuntap_dev *device, const char *devname, const char *address_mode,
+                       char *device_ip, char *device_mask, const char *device_mac,
+                       int mtu, int metric, BOOL create_if_needed);
+extern int wintun_read(tuntap_dev *device, unsigned char *buf, int len);
+extern int wintun_write(tuntap_dev *device, unsigned char *buf, int len);
+extern void wintun_close(tuntap_dev *device);
+extern void wintun_get_address(tuntap_dev *device);
+extern BOOL wintun_available(void);
+
+/* Flag to prefer wintun over TAP-Win32 */
+static int prefer_wintun = 0;
+
+/* Flag to track if we're using wintun driver */
+static int using_wintun = 0;
 
 /* ***************************************************** */
 
@@ -396,56 +415,91 @@ int open_wintap(struct tuntap_dev *device,
 
 int tuntap_read(struct tuntap_dev *tuntap, unsigned char *buf, int len)
 {
-  DWORD read_size;
-  int last_err;
+    /* If using wintun, delegate to wintun_read */
+    if (using_wintun) {
+        return wintun_read(tuntap, buf, len);
+    }
 
-  ResetEvent(tuntap->overlap_read.hEvent);
-  if (ReadFile(tuntap->device_handle, buf, len, &read_size, &tuntap->overlap_read)) {
-    //printf("tun_read(len=%d)\n", read_size);
-    return read_size;
-  }
-  switch (last_err = GetLastError()) {
-  case ERROR_IO_PENDING:
-    WaitForSingleObject(tuntap->overlap_read.hEvent, INFINITE);
-    GetOverlappedResult(tuntap->device_handle, &tuntap->overlap_read, &read_size, FALSE);
-    return read_size;
-    break;
-  default:
-    printf("GetLastError() returned %d\n", last_err);
-    break;
-  }
+    /* Traditional TAP-Win32 read */
+    DWORD read_size;
+    int last_err;
 
-  return -1;
+    ResetEvent(tuntap->overlap_read.hEvent);
+    if (ReadFile(tuntap->device_handle, buf, len, &read_size, &tuntap->overlap_read)) {
+        //printf("tun_read(len=%d)\n", read_size);
+        return read_size;
+    }
+    switch (last_err = GetLastError()) {
+    case ERROR_IO_PENDING:
+        WaitForSingleObject(tuntap->overlap_read.hEvent, INFINITE);
+        GetOverlappedResult(tuntap->device_handle, &tuntap->overlap_read, &read_size, FALSE);
+        return read_size;
+        break;
+    default:
+        printf("GetLastError() returned %d\n", last_err);
+        break;
+    }
+
+    return -1;
 }
+
 /* ************************************************ */
 
 int tuntap_write(struct tuntap_dev *tuntap, unsigned char *buf, int len)
 {
-  DWORD write_size;
+    /* If using wintun, delegate to wintun_write */
+    if (using_wintun) {
+        return wintun_write(tuntap, buf, len);
+    }
 
-  //printf("tun_write(len=%d)\n", len);
+    /* Traditional TAP-Win32 write */
+    DWORD write_size;
 
-  ResetEvent(tuntap->overlap_write.hEvent);
-  if (WriteFile(tuntap->device_handle,
-		buf,
-		len,
-		&write_size,
-		&tuntap->overlap_write)) {
-    //printf("DONE tun_write(len=%d)\n", write_size);
-    return write_size;
-  }
-  switch (GetLastError()) {
-  case ERROR_IO_PENDING:
-    WaitForSingleObject(tuntap->overlap_write.hEvent, INFINITE);
-    GetOverlappedResult(tuntap->device_handle, &tuntap->overlap_write,
-			&write_size, FALSE);
-    return write_size;
-    break;
-  default:
-    break;
-  }
+    //printf("tun_write(len=%d)\n", len);
 
-  return -1;
+    ResetEvent(tuntap->overlap_write.hEvent);
+    if (WriteFile(tuntap->device_handle,
+            buf,
+            len,
+            &write_size,
+            &tuntap->overlap_write)) {
+        //printf("DONE tun_write(len=%d)\n", write_size);
+        return write_size;
+    }
+    switch (GetLastError()) {
+    case ERROR_IO_PENDING:
+        WaitForSingleObject(tuntap->overlap_write.hEvent, INFINITE);
+        GetOverlappedResult(tuntap->device_handle, &tuntap->overlap_write,
+                &write_size, FALSE);
+        return write_size;
+        break;
+    default:
+        break;
+    }
+
+    return -1;
+}
+
+/* ************************************************ */
+
+/* Internal flag to track if we're using wintun */
+/* (declared at file start) */
+
+/* ************************************************ */
+
+/**
+ * Set preference for wintun over TAP-Win32
+ * Call this before tuntap_open to prefer wintun driver
+ */
+void set_tuntap_prefer_wintun(int prefer) {
+    prefer_wintun = prefer;
+}
+
+/**
+ * Check if wintun is available on this system
+ */
+int check_wintun_available(void) {
+    return wintun_available() ? 1 : 0;
 }
 
 /* ************************************************ */
@@ -458,12 +512,70 @@ int tuntap_open(struct tuntap_dev *device,
                 const char * device_mac, 
                 int mtu,
                 int metric) {
-    return(open_wintap(device, dev, address_mode, device_ip, device_mask, device_mac, mtu, metric));
+    int result;
+    const char *wintun_dev_name = dev;
+    
+    /* If no device name specified, use "n2n" as default for wintun */
+    if (!dev || !dev[0]) {
+        wintun_dev_name = "n2n";
+    }
+    
+    /* If wintun is preferred (-w flag), try it first */
+    if (prefer_wintun && wintun_available()) {
+        traceEvent(TRACE_NORMAL, "Wintun preferred (-w), attempting wintun adapter (name='%s')...", wintun_dev_name);
+        
+        /* Try to open/create wintun adapter - will auto-create if not found */
+        result = wintun_open(device, wintun_dev_name, address_mode, device_ip, device_mask, 
+                             device_mac, mtu, metric, TRUE);
+        
+        if (result == 0) {
+            using_wintun = 1;
+            traceEvent(TRACE_NORMAL, "Using wintun adapter '%s'", wintun_dev_name);
+            return 0;
+        }
+        
+        traceEvent(TRACE_WARNING, "Failed to use wintun (result=%d), falling back to TAP-Win32", result);
+    }
+    
+    /* Try traditional TAP-Win32 first (or as fallback from wintun failure) */
+    traceEvent(TRACE_INFO, "Attempting to use TAP-Win32 adapter...");
+    result = open_wintap(device, dev, address_mode, device_ip, device_mask, device_mac, mtu, metric);
+    
+    if (result == 0) {
+        using_wintun = 0;
+        traceEvent(TRACE_NORMAL, "Using TAP-Win32 adapter");
+        return 0;
+    }
+    
+    /* TAP-Win32 failed, try wintun as fallback (auto-create) if not already tried */
+    if (!prefer_wintun && wintun_available()) {
+        traceEvent(TRACE_WARNING, "TAP-Win32 adapter not found (result=%d), trying wintun (auto-create)...", result);
+        
+        result = wintun_open(device, wintun_dev_name, address_mode, device_ip, device_mask,
+                             device_mac, mtu, metric, TRUE);
+        
+        if (result == 0) {
+            using_wintun = 1;
+            traceEvent(TRACE_NORMAL, "Using wintun adapter '%s' (auto-created)", wintun_dev_name);
+            return 0;
+        }
+    }
+    
+    /* Both methods failed */
+    traceEvent(TRACE_ERROR, "Failed to open any network adapter. "
+               "Please install TAP-Win32 driver or place wintun.dll alongside edge.exe");
+    return -1;
 }
 
 /* ************************************************ */
 
 void tuntap_close(struct tuntap_dev *tuntap) {
+
+    /* If using wintun, delegate to wintun_close */
+    if (using_wintun) {
+        wintun_close(tuntap);
+        return;
+    }
 
 #ifdef _WIN64
   /* See comment in open_wintap for notes about this ifdef */

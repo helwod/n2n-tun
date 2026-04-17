@@ -4,11 +4,42 @@ n2n provides its service through a TAP device which is the virtual ethernet devi
 
 For MacOS and Windows there are specific instructions; please see the [Building](./Building.md) document.
 
+## Windows Network Drivers
+
+On Windows, n2n supports two network drivers:
+
+### Wintun (Recommended)
+- High-performance TUN driver developed by WireGuard
+- Better throughput and lower latency than TAP-Win32
+- Uses efficient ring buffers for packet I/O
+- Download: [WireGuard/wintun releases](https://github.com/WireGuard/wintun/releases)
+- Place `wintun.dll` alongside `edge.exe`
+- Use `-w` or `--use-wintun` to prefer wintun driver
+
+### TAP-Win32 (Legacy)
+- Traditional TAP driver from OpenVPN project
+- Requires manual driver installation
+- Download: http://build.openvpn.net/downloads/releases/tap-windows-9.9.2_3.exe
+- More compatible with older Windows versions
+
+### Driver Selection
+n2n automatically selects the driver:
+1. If `-w` is specified, wintun is preferred
+2. If wintun.dll is available, n2n tries wintun first
+3. Falls back to TAP-Win32 if wintun is unavailable or fails
+
+### Automatic Adapter Creation
+When using `-d <device>` and no matching adapter exists:
+- **Wintun**: Automatically creates a new wintun adapter with the specified name
+- **TAP-Win32**: Requires pre-installed adapter (manual installation needed)
+
 ## Device Name
 
 If the OS specific driver allows **naming** the virtual Ethernet device created by n2n, the `-d <device>` command-line option can be used to give a name, e.g. `-d n2n0`. This device name makes the virtual ethernet device easily accessible to all `ip` command activity, `iptables`, `tcpdump` and any other of your preferred network tools. It defaults to `edge0` if not provided through `-d`.
 
 One exception applies to Windows: As the installed TAP driver(s) come with fixed names, `-d <device>` **selects** the appropriate device by name out of the present ones. This is only required if more than one TAP devices are present. To help with it, `edge --help` lists the available TAP adapters at the bottom of its output (Windows only).
+
+With wintun driver, the device name is user-defined, and n2n can automatically create a new adapter if the specified name doesn't exist.
 
 ## MAC
 

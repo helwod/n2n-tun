@@ -68,5 +68,6 @@
 extern void initWin32();
 extern void destroyWin32();
 extern void win_print_available_adapters();
+extern void set_tuntap_prefer_wintun(int prefer);
 
 #endif

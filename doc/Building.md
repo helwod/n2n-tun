@@ -56,6 +56,27 @@ development.
 These steps were tested on a fresh install of Windows 10 Pro with all patches
 applied as of 2021-09-29.
 
+### Option 1: CMake (Recommended)
+
+- Install [MSYS2](https://www.msys2.org/)
+- Open MSYS2 UCRT64 or MINGW64 terminal
+- Install dependencies:
+  ```bash
+  pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-make
+  pacman -S mingw-w64-ucrt-x86_64-openssl mingw-w64-ucrt-x86_64-zstd
+  ```
+- Build:
+  ```bash
+  cd n2n
+  mkdir build && cd build
+  cmake -G "MinGW Makefiles" ..
+  cmake --build .
+  ```
+
+For more details, see [Building-Windows.md](./Building-Windows.md).
+
+### Option 2: Autotools (Legacy)
+
 - Install Chocolatey (Following instructions on https://chocolatey.org/install)
 - from an admin cmd prompt
     - `choco install git mingw make`
@@ -79,11 +100,24 @@ will be compatible.
 
 ## Run on Windows
 
-In order to run n2n on Windows, you will need the following:
+In order to run n2n on Windows, you will need one of the following network drivers:
 
+### TAP-Win32 Driver (Traditional)
 - The TAP drivers should be installed into the system. They can be installed from
   http://build.openvpn.net/downloads/releases, search for "tap-windows".
 
+### Wintun Driver (Recommended)
+- [Wintun](https://www.wintun.net/) provides better performance than TAP-Win32
+- Download from [WireGuard/wintun releases](https://github.com/WireGuard/wintun/releases)
+- Place `wintun.dll` in the same directory as `edge.exe` or in PATH
+- Use `-w` or `--use-wintun` option to prefer wintun driver
+
+### Automatic Adapter Creation
+When using `-d <device>` and the specified adapter does not exist:
+- With wintun enabled: n2n will automatically create a new wintun adapter
+- With TAP-Win32: You need to pre-install the TAP driver
+
+Other requirements:
 - If OpenSSL has been linked dynamically, the corresponding `.dll` file should be available
   onto the target computer.
 
