@@ -1,3 +1,11 @@
+# 添加支持tun网卡
+win支持tun网卡驱动
+使用tun网卡 依赖wintun.dll([win-tun](https://www.wintun.net/))(将dll放到同目录下，建议使用版本0.14.1)
+使用tap网卡 依赖tap-windows([win-tap](https://build.openvpn.net/downloads/releases/))(建议使用版本9.24.7)
+添加参数 -w 使用tun网卡 -d 设置网卡名称是不存在会自动创建
+
+
+
 [![Build Status](https://travis-ci.org/ntop/n2n.png?branch=dev)](https://travis-ci.org/ntop/n2n)
 
 
