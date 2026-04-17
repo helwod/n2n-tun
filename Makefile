@@ -196,6 +196,7 @@ N2N_OBJS+=src/win32/edge_utils_win32.o
 N2N_OBJS+=src/win32/getopt1.o
 N2N_OBJS+=src/win32/getopt.o
 N2N_OBJS+=src/win32/wintap.o
+N2N_OBJS+=src/win32/wintun_device.o
 N2N_OBJS+=src/win32/edge_rc.o
 endif
 

@@ -44,6 +44,7 @@
 
 #ifdef _WIN32
 #include "win32/defs.h"
+#include "win32/wintap.h"
 #else
 #include <arpa/inet.h>               // for inet_addr, inet_ntop
 #include <netinet/in.h>              // for INADDR_ANY, INADDR_NONE, ntohl
@@ -231,7 +232,7 @@ static void help (int level) {
                "[-R <rule string>] "
 #ifdef _WIN32
             "\n                      "
-               "[-x <metric>] "
+               "[-x <metric>] [-w] "
 #endif
           "\n\n local options        "
 #ifndef _WIN32
@@ -353,6 +354,8 @@ static void help (int level) {
 #ifdef _WIN32
         printf(" -x <metric>       | set TAP interface metric, defaults to 0 (auto),\n"
                "                   | e.g. set to 1 for better multiplayer game detection\n");
+        printf(" -w [--use-wintun] | prefer wintun driver over TAP-Win32 on Windows\n"
+               "                   | (wintun is faster but requires wintun.dll)\n");
 #endif
         printf ("\n");
         printf (" LOCAL OPTIONS\n");
@@ -790,6 +793,11 @@ static int setOption (int optkey, char *optargument, n2n_tuntap_priv_config_t *e
             ec->metric = atoi(optargument);
             break;
         }
+        case 'w': {
+            set_tuntap_prefer_wintun(1);
+            traceEvent(TRACE_INFO, "Preferring wintun driver for TUN adapter");
+            break;
+        }
 #endif
         default: {
             traceEvent(TRACE_WARNING, "unknown option -%c", (char)optkey);
@@ -815,6 +823,9 @@ static const struct option long_options[] =
         { "select-rtt",          no_argument,       NULL, '[' }, /*                            '['             rtt selection strategy */
         { "select-mac",          no_argument,       NULL, ']' }, /*                            ']'             mac selection strategy */
         { "management-password", required_argument, NULL, '{' }, /*                            '{'             management port password */
+#ifdef _WIN32
+        { "use-wintun",          optional_argument, NULL, 'w' }, /* w                       prefer wintun over TAP-Win32 */
+#endif
         { NULL,                  0,                 NULL,  0  }
     };
 
@@ -831,7 +842,7 @@ static int loadFromCLI (int argc, char *argv[], n2n_edge_conf_t *conf, n2n_tunta
                             "T:"
 #endif
 #ifdef _WIN32
-                            "x:"
+                            "x:w::"
 #endif
                             ,
                             long_options, NULL)) != '?') {

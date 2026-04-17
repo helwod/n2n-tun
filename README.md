@@ -66,6 +66,8 @@ make install
 
 For Windows, MacOS, optimizations and general building options, please check out [Building documentation](doc/Building.md) for compilation and running.
 
+**Windows Note:** n2n supports WireGuard's wintun driver for better performance. Use `-w` option to prefer wintun over TAP-Win32.
+
 **IMPORTANT** It is generally recommended to use the [latest stable release](https://github.com/ntop/n2n/releases). Please note that the current _dev_ branch usually is not guaranteed to be backward compatible neither with the latest stable release nor with previous _dev_ states. On the other hand, if you dare to try bleeding edge features, you are encouraged to compile from _dev_ – just keep track of sometimes rapidly occuring changes. Feedback in the _Issues_ section is appreciated.
 
 
