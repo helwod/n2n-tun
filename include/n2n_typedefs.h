@@ -708,6 +708,7 @@ struct n2n_edge {
     bool                             *keep_running;                      /**< Pointer to edge loop stop/go flag */
     struct peer_info                 *curr_sn;                           /**< Currently active supernode. */
     uint8_t                          sn_wait;                            /**< Whether we are waiting for a supernode response. */
+    uint8_t                          sn_reconnect_pending;               /**< Set when a network error forced a socket reconnect; cleared on the next successful REGISTER_SUPER_ACK so we can log "reconnected". */
     uint8_t                          sn_pong;                            /**< Whether we have seen a PONG since last time reset. */
     size_t                           sup_attempts;                       /**< Number of remaining attempts to this supernode. */
     tuntap_dev                       device;                             /**< All about the TUNTAP device */

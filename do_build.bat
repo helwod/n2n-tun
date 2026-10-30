@@ -4,8 +4,11 @@ setlocal
 REM === n2n Windows Build ===
 set PATH=C:\msys64\ucrt64\bin;%PATH%
 set CC=gcc.exe
-set SRC=C:\Users\Administrator\CodeBuddy\n2n
-set BUILD=%SRC%\build
+rem Build in the directory where this script lives (portable: no hardcoded path).
+rem This avoids generating artifacts in a different tree when the clone lives elsewhere.
+set "SRC=%~dp0"
+set "BUILD=%SRC%build"
+if not exist "%BUILD%" mkdir "%BUILD%"
 
 echo =============================================
 echo   n2n Windows Build (MinGW)

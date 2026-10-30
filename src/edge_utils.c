@@ -1101,6 +1101,32 @@ err_out:
         traceEvent(TRACE_DEBUG, "error in sendto_fd");
     }
 
+    // For UDP sockets, if sendto fails with network/host unreachable errors,
+    // close the socket so it gets rebuilt with a fresh route on next attempt.
+    // This handles network changes (WiFi reconnect, VPN toggle, multi-NIC routing
+    // changes) where the old socket's cached route is stale.
+    // Only check errors when sendto was actually attempted (sent == -1).
+    if(!eee->conf.connect_tcp && (eee->sock >= 0) && (sent == -1)) {
+#ifdef _WIN32
+        int wsa_err = WSAGetLastError();
+        if(wsa_err == WSAEHOSTUNREACH || wsa_err == WSAENETUNREACH ||
+           wsa_err == WSAENETDOWN || wsa_err == WSAEHOSTDOWN ||
+           wsa_err == WSAECONNRESET || wsa_err == WSAEAFNOSUPPORT) {
+            traceEvent(TRACE_WARNING, "sendto failed with network error %d, closing socket for reconnection", wsa_err);
+            supernode_disconnect(eee);
+            eee->sn_wait = 1;
+            eee->sn_reconnect_pending = 1;
+        }
+#else
+        if(errno == EHOSTUNREACH || errno == ENETUNREACH || errno == ENETDOWN || errno == EAFNOSUPPORT) {
+            traceEvent(TRACE_WARNING, "sendto failed with network error (%d) %s, closing socket for reconnection", errno, errstr);
+            supernode_disconnect(eee);
+            eee->sn_wait = 1;
+            eee->sn_reconnect_pending = 1;
+        }
+#endif
+    }
+
     /*
      * If we got an error and are using UDP, this is still an error
      * case.  The only caller of sendto_fd() checks the return only
@@ -2596,6 +2622,13 @@ void process_udp (n2n_edge_t *eee, const struct sockaddr *sender_sock, const SOC
                 eee->sn_wait = 0;
                 reset_sup_attempts(eee); /* refresh because we got a response */
 
+                /* Log a clear confirmation when a reconnect (triggered by a
+                 * network error / WiFi switch) has completed successfully. */
+                if(eee->sn_reconnect_pending) {
+                    eee->sn_reconnect_pending = 0;
+                    traceEvent(TRACE_NORMAL, "[OK] edge reconnected to supernode <<< ================ >>>");
+                }
+
                 // update last_sup only on 'real' REGISTER_SUPER_ACKs, not on bootstrap ones (own MAC address
                 // still null_mac) this allows reliable in/out PACKET drop if not really registered with a supernode yet
                 if(!is_null_mac(eee->device.mac_addr)) {
@@ -2798,14 +2831,46 @@ int fetch_and_eventually_process_data (n2n_edge_t *eee, SOCKET sock,
 #endif
       ) {
         // udp
+        // socket already closed / awaiting reconnect after a sendto failure
+        // (e.g. WiFi dropped, sendto got 10051 and closed it): never call
+        // recvfrom() on an invalid handle, that yields WSAENOTSOCK (10038).
+        if(sock < 0)
+            return 0;
+
         bread = recvfrom(sock, (void *)pktbuf, N2N_PKT_BUF_SIZE, 0 /*flags*/,
                          sender_sock, &ss_size);
 
-        if((bread < 0)
+        if(bread < 0) {
 #ifdef _WIN32
-           && (WSAGetLastError() != WSAECONNRESET)
+            int werr = WSAGetLastError();
+            /* Transient errors caused by a vanishing interface (WiFi switch /
+             * roaming, IP address loss, or a socket already closed for reconnect).
+             * Do NOT terminate the edge: just trigger a socket reconnect. */
+            if(werr == WSAENOTSOCK       /* 10038 socket already closed        */
+               || werr == WSAENETRESET   /* 10052 network dropped connection  */
+               || werr == WSAENETDOWN    /* 10050 network subsystem down      */
+               || werr == WSAENETUNREACH /* 10051 network unreachable         */
+               || werr == WSAEHOSTUNREACH/* 10065 no route to host            */
+               || werr == WSAEADDRNOTAVAIL/*10049 local addr not assigned     */
+               || werr == WSAEAFNOSUPPORT/*10047 address family not supported */
+               || werr == WSAEWOULDBLOCK /* 10035 would block                */
+               || werr == WSAEINTR       /* 10004 interrupted                 */
+               || werr == WSAETIMEDOUT)  /* 10060 timeout                     */ {
+                traceEvent(TRACE_WARNING,
+                           "recvfrom() transient error %u, re-opening socket", werr);
+                if(sock == eee->sock) {
+                    supernode_disconnect(eee);
+                    eee->sn_wait = 1;
+                    eee->multicast_joined = 0;   /* re-join on the new interface */
+                    eee->sn_reconnect_pending = 1;
+                }
+                return 0;
+            }
+            if(werr == WSAECONNRESET) {
+                /* original behaviour: transient ICMP port-unreachable, ignore */
+                return 0;
+            }
 #endif
-          ) {
             /* For UDP bread of zero just means no data (unlike TCP). */
             /* The fd is no good now. Maybe we lost our interface. */
             traceEvent(TRACE_ERROR, "recvfrom() failed %d errno %d (%s)", bread, errno, strerror(errno));
@@ -3063,7 +3128,13 @@ int run_edge_loop (n2n_edge_t *eee) {
     send_unregister_super(eee);
 
 #ifdef _WIN32
-    WaitForSingleObject(tun_read_thread, INFINITE);
+    // Cancel any pending overlapped read on the TAP device so the read
+    // thread can exit promptly instead of blocking until INFINITE.
+    if(eee->device.device_handle != INVALID_HANDLE_VALUE)
+        CancelIoEx(eee->device.device_handle, &eee->device.overlap_read);
+    if(WaitForSingleObject(tun_read_thread, 3000) != WAIT_OBJECT_0)
+        traceEvent(TRACE_WARNING, "TAP read thread did not exit in time");
+    CloseHandle(tun_read_thread);
 #endif
 
     supernode_disconnect(eee);
