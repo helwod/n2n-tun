@@ -1,4 +1,4 @@
-> 语言 / Language: [简体中文](README.zh.md) · [English](README.en.md)
+> 语言 / Language: [简体中文](README.zh.md) · [English](README.md)
 
 # n2n-tun（支持 Windows TUN/TAP 网卡的 n2n 分支）
 
